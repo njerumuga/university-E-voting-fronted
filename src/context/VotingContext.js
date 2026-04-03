@@ -1,13 +1,10 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
-
 const VotingContext = createContext();
 
-
 const API_BASE_URL = window.location.hostname === 'localhost' 
-    ? 'http://localhost:8080/api' 
-    : 'https://university-e-voting-backend.onrender.com/api'; 
-
+    ? 'http://localhost:8080/api/voters' // Added /voters here
+    : 'https://university-e-voting-backend.onrender.com/api/voters'; // Added /voters here
 
 export const PHASES = {
     REGISTRATION: 'registration',
@@ -21,7 +18,6 @@ export function VotingProvider({ children }) {
     const [currentVoter, setCurrentVoter] = useState(null);
     const [adminLoggedIn, setAdminLoggedIn] = useState(false);
 
-    // Initial load: Check for existing tokens
     useEffect(() => {
         const vToken = localStorage.getItem('voter_token');
         const aToken = localStorage.getItem('admin_token');
@@ -31,7 +27,7 @@ export function VotingProvider({ children }) {
 
     const fetchCandidates = async (token) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/voters/candidates`, {
+            const response = await fetch(`${API_BASE_URL}/candidates`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (response.ok) {
@@ -43,7 +39,7 @@ export function VotingProvider({ children }) {
 
     const fetchCurrentVoter = async (token) => {
         try {
-            const res = await fetch(`${API_BASE_URL}/voters/me`, {
+            const res = await fetch(`${API_BASE_URL}/me`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
@@ -54,14 +50,12 @@ export function VotingProvider({ children }) {
                 localStorage.removeItem('voter_token');
                 setCurrentVoter(null);
             }
-        } catch (err) { 
-            console.error("Failed to fetch user profile. Server might be sleeping.", err); 
-        }
+        } catch (err) { console.error("Failed to fetch user profile.", err); }
     };
 
     const registerVoter = async (formData) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/voters/register`, {
+            const response = await fetch(`${API_BASE_URL}/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -77,12 +71,12 @@ export function VotingProvider({ children }) {
             if (response.ok) return { success: true };
             const errorText = await response.text();
             return { success: false, message: errorText || 'Registration failed.' };
-        } catch (err) { return { success: false, message: 'Server unreachable. Try again in 30 seconds.' }; }
+        } catch (err) { return { success: false, message: 'Server unreachable.' }; }
     };
 
     const loginVoter = async (admissionNumber, password) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/login`, { // Standardized login endpoint
+            const response = await fetch(`${API_BASE_URL}/login`, { 
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ admissionNumber, password }),
@@ -97,29 +91,6 @@ export function VotingProvider({ children }) {
         } catch (err) { return { success: false, message: 'Connection error.' }; }
     };
 
-    const castVote = async (payload) => {
-        const token = localStorage.getItem('voter_token');
-        const candidateId = payload.selection || payload.candidateId;
-
-        try {
-            const response = await fetch(`${API_BASE_URL}/voters/vote`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ candidateId: parseInt(candidateId) }),
-            });
-
-            if (response.ok) {
-                setCurrentVoter(prev => ({ ...prev, hasVoted: true }));
-                return { success: true };
-            }
-            const errorMsg = await response.text();
-            return { success: false, message: errorMsg || 'Voting failed.' };
-        } catch (err) { return { success: false, message: 'Server error.' }; }
-    };
-
     const adminLogin = async (username, password) => {
         try {
             const response = await fetch(`${API_BASE_URL}/login`, {
@@ -129,6 +100,7 @@ export function VotingProvider({ children }) {
             });
             if (response.ok) {
                 const token = await response.text();
+                // We check if the response actually contains a token
                 localStorage.setItem('admin_token', token);
                 setAdminLoggedIn(true);
                 return { success: true };
@@ -140,7 +112,26 @@ export function VotingProvider({ children }) {
     return (
         <VotingContext.Provider value={{
             phase, setElectionPhase: setPhase, candidates, currentVoter, adminLoggedIn,
-            registerVoter, loginVoter, castVote, adminLogin,
+            registerVoter, loginVoter, adminLogin,
+            castVote: async (payload) => {
+                const token = localStorage.getItem('voter_token');
+                const candidateId = payload.selection || payload.candidateId;
+                try {
+                    const response = await fetch(`${API_BASE_URL}/vote`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${token}`
+                        },
+                        body: JSON.stringify({ candidateId: parseInt(candidateId) }),
+                    });
+                    if (response.ok) {
+                        setCurrentVoter(prev => ({ ...prev, hasVoted: true }));
+                        return { success: true };
+                    }
+                    return { success: false, message: 'Voting failed.' };
+                } catch (err) { return { success: false, message: 'Server error.' }; }
+            },
             adminLogout: () => {
                 localStorage.removeItem('admin_token');
                 localStorage.removeItem('voter_token');
