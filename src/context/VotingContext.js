@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
+
 const VotingContext = createContext();
 
-// DYNAMIC URL: Uses localhost for dev, and your Render link for production
+
 const API_BASE_URL = window.location.hostname === 'localhost' 
     ? 'http://localhost:8080/api' 
-    : 'https://voting-backend-v1.onrender.com/api'; // REPLACE THIS with your actual Render URL
+    : 'https://university-e-voting-backend.onrender.com/api'; 
+
 
 export const PHASES = {
     REGISTRATION: 'registration',
