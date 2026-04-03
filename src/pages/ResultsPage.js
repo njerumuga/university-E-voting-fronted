@@ -2,11 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { useVoting, PHASES } from '../context/VotingContext';
 
 export default function ResultsPage({ onNavigate }) {
-    const { phase, candidates } = useVoting();
+    // Note: Ensure your VotingContext exports a refresh function or candidates update automatically
+    const { phase, candidates } = useVoting(); 
     const [groupedResults, setGroupedResults] = useState({});
 
     useEffect(() => {
-        // Group by School -> Position -> then Sort by votes
+        // Group and Sort Logic
         const groups = candidates.reduce((acc, c) => {
             const school = c.school || 'General';
             const pos = c.position || 'General Seat';
@@ -18,15 +19,20 @@ export default function ResultsPage({ onNavigate }) {
             return acc;
         }, {});
 
-        // Sort each sub-group by vote count (highest first)
         Object.keys(groups).forEach(school => {
             Object.keys(groups[school]).forEach(pos => {
-                groups[school][pos].sort((a, b) => b.voteCount - a.voteCount);
+                groups[school][pos].sort((a, b) => (b.voteCount || 0) - (a.voteCount || 0));
             });
         });
 
         setGroupedResults(groups);
     }, [candidates]);
+
+    // OPTIONAL: If your context doesn't auto-refresh, you can add a local fetch here
+    // useEffect(() => {
+    //    const interval = setInterval(() => { /* logic to fetch candidates */ }, 5000);
+    //    return () => clearInterval(interval);
+    // }, []);
 
     return (
         <div style={styles.page}>
@@ -70,8 +76,8 @@ export default function ResultsPage({ onNavigate }) {
                                                 </div>
                                             </div>
                                             <div style={styles.rightStats}>
-                                                <div style={{...styles.voteCount, color: index === 0 ? 'var(--green)' : 'var(--white)'}}>
-                                                    {c.voteCount}
+                                                <div style={{...styles.voteCount, color: index === 0 && c.voteCount > 0 ? 'var(--green)' : 'var(--white)'}}>
+                                                    {c.voteCount || 0}
                                                 </div>
                                                 <div style={styles.voteLabel}>TOTAL VOTES</div>
                                             </div>
