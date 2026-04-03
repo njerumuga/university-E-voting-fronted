@@ -18,50 +18,49 @@ export function VotingProvider({ children }) {
     const [currentVoter, setCurrentVoter] = useState(null);
     const [adminLoggedIn, setAdminLoggedIn] = useState(false);
 
-    // --- NEW: FETCH PHASE FROM DATABASE ---
+    // --- UPDATED: FETCH PHASE FROM DATABASE AS JSON ---
     const fetchElectionPhase = useCallback(async () => {
         try {
             const res = await fetch(`${API_BASE_URL}/settings/phase`);
             if (res.ok) {
-                const cloudPhase = await res.text();
-                setPhase(cloudPhase);
+                const data = await res.json(); // Changed from .text() to .json()
+                setPhase(data.phase); // Access the 'phase' key from the Map/JSON
             }
-        } catch (err) { console.error("Could not sync election phase", err); }
+        } catch (err) { 
+            console.error("Could not sync election phase. Server might be down.", err); 
+        }
     }, []);
 
-    // --- NEW: UPDATE PHASE IN DATABASE ---
+    // --- UPDATED: SAVE PHASE TO DATABASE ---
     const setElectionPhase = async (newPhase) => {
-        setPhase(newPhase); // Update local UI immediately
+        setPhase(newPhase); // Update UI immediately for responsiveness
         try {
             await fetch(`${API_BASE_URL}/settings/phase`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ phase: newPhase }),
             });
-        } catch (err) { console.error("Failed to save phase to database", err); }
+        } catch (err) { 
+            console.error("Failed to save phase to database", err); 
+        }
     };
 
-    useEffect(() => {
-        fetchElectionPhase(); // Sync phase on load
-        const vToken = localStorage.getItem('voter_token');
-        const aToken = localStorage.getItem('admin_token');
-        if (vToken) fetchCurrentVoter(vToken);
-        if (aToken) setAdminLoggedIn(true);
-    }, [fetchElectionPhase]);
-
-    const fetchCandidates = async (token) => {
+    const fetchCandidates = useCallback(async (token) => {
+        const activeToken = token || localStorage.getItem('voter_token');
+        if (!activeToken) return;
+        
         try {
             const response = await fetch(`${API_BASE_URL}/candidates`, {
-                headers: { 'Authorization': `Bearer ${token}` }
+                headers: { 'Authorization': `Bearer ${activeToken}` }
             });
             if (response.ok) {
                 const data = await response.json();
                 setCandidates(data);
             }
         } catch (err) { console.error("Fetch candidates failed", err); }
-    };
+    }, []);
 
-    const fetchCurrentVoter = async (token) => {
+    const fetchCurrentVoter = useCallback(async (token) => {
         try {
             const res = await fetch(`${API_BASE_URL}/me`, {
                 headers: { 'Authorization': `Bearer ${token}` }
@@ -75,7 +74,17 @@ export function VotingProvider({ children }) {
                 setCurrentVoter(null);
             }
         } catch (err) { console.error("Failed to fetch user profile.", err); }
-    };
+    }, [fetchCandidates]);
+
+    useEffect(() => {
+        fetchElectionPhase(); // Global sync on load
+        
+        const vToken = localStorage.getItem('voter_token');
+        const aToken = localStorage.getItem('admin_token');
+        
+        if (vToken) fetchCurrentVoter(vToken);
+        if (aToken) setAdminLoggedIn(true);
+    }, [fetchElectionPhase, fetchCurrentVoter]);
 
     const registerVoter = async (formData) => {
         try {
@@ -144,22 +153,24 @@ export function VotingProvider({ children }) {
             });
             if (response.ok) {
                 setCurrentVoter(prev => ({ ...prev, hasVoted: true }));
+                fetchCandidates(token); // Refresh local tally after voting
                 return { success: true };
             }
             return { success: false };
         } catch (err) { return { success: false }; }
     };
 
+    const adminLogout = () => {
+        localStorage.removeItem('admin_token');
+        localStorage.removeItem('voter_token');
+        setAdminLoggedIn(false);
+        setCurrentVoter(null);
+    };
+
     return (
         <VotingContext.Provider value={{
             phase, setElectionPhase, candidates, currentVoter, adminLoggedIn,
-            registerVoter, loginVoter, adminLogin, castVote,
-            adminLogout: () => {
-                localStorage.removeItem('admin_token');
-                localStorage.removeItem('voter_token');
-                setAdminLoggedIn(false);
-                setCurrentVoter(null);
-            }
+            registerVoter, loginVoter, adminLogin, castVote, adminLogout
         }}>
             {children}
         </VotingContext.Provider>
