@@ -13,6 +13,11 @@ export default function AdminPage({ onNavigate }) {
     const [creds, setCreds] = useState({ username: '', password: '' });
     const [loginError, setLoginError] = useState('');
 
+    // --- DYNAMIC API URL CONFIGURATION ---
+    const BASE_URL = window.location.hostname === 'localhost' 
+        ? 'http://localhost:8080/api' 
+        : 'https://university-e-voting-backend.onrender.com/api';
+
     useEffect(() => {
         if (adminLoggedIn) fetchAdminData();
     }, [adminLoggedIn]);
@@ -23,19 +28,21 @@ export default function AdminPage({ onNavigate }) {
         const headers = { 'Authorization': `Bearer ${token}` };
         try {
             const [vRes, cRes] = await Promise.all([
-                fetch('http://localhost:8080/api/admin/voters', { headers }),
-                fetch('http://localhost:8080/api/admin/results', { headers })
+                fetch(`${BASE_URL}/admin/voters`, { headers }),
+                fetch(`${BASE_URL}/admin/results`, { headers })
             ]);
             if (vRes.ok) setVoters(await vRes.json());
             if (cRes.ok) setCandidates(await cRes.json());
-        } catch (err) { console.error("Admin API Error", err); }
+        } catch (err) { 
+            console.error("Admin API Error: Server might be waking up...", err); 
+        }
         setLoading(false);
     };
 
     const handleAddCandidate = async (e) => {
         e.preventDefault();
         const token = localStorage.getItem('admin_token');
-        const res = await fetch('http://localhost:8080/api/admin/candidates', {
+        const res = await fetch(`${BASE_URL}/admin/candidates`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify(newCandidate)
@@ -49,7 +56,7 @@ export default function AdminPage({ onNavigate }) {
     const handleDeleteCandidate = async (id) => {
         if (!window.confirm("Permanent Action: Delete candidate from server?")) return;
         const token = localStorage.getItem('admin_token');
-        await fetch(`http://localhost:8080/api/admin/candidates/${id}`, {
+        await fetch(`${BASE_URL}/admin/candidates/${id}`, {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${token}` }
         });
@@ -72,8 +79,8 @@ export default function AdminPage({ onNavigate }) {
     const selectStyle = { backgroundColor: '#1f2937', color: 'white', border: '1px solid var(--border)', padding: '10px', borderRadius: '8px' };
 
     const filteredVoters = voters.filter(v =>
-        v.admissionNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        v.name.toLowerCase().includes(searchTerm.toLowerCase())
+        (v.admissionNumber && v.admissionNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (v.name && v.name.toLowerCase().includes(searchTerm.toLowerCase()))
     );
 
     if (!adminLoggedIn) {
@@ -89,15 +96,16 @@ export default function AdminPage({ onNavigate }) {
                     <form onSubmit={handleLogin}>
                         <div className="form-group">
                             <label className="form-label">Admin ID</label>
-                            <input className="form-input" value={creds.username} onChange={e => setCreds({...creds, username: e.target.value})} />
+                            <input className="form-input" value={creds.username} onChange={e => setCreds({...creds, username: e.target.value})} required />
                         </div>
                         <div className="form-group">
                             <label className="form-label">Secret Key</label>
-                            <input className="form-input" type="password" value={creds.password} onChange={e => setCreds({...creds, password: e.target.value})} />
+                            <input className="form-input" type="password" value={creds.password} onChange={e => setCreds({...creds, password: e.target.value})} required />
                         </div>
-                        <button className="btn btn-primary btn-full btn-lg" type="submit">Unlock Dashboard</button>
+                        <button className="btn btn-primary btn-full btn-lg" type="submit" disabled={loading}>
+                            {loading ? 'Waking Server...' : 'Unlock Dashboard'}
+                        </button>
                     </form>
-                    {/* BACK BUTTON FOR LOGIN PAGE */}
                     <button className="btn btn-secondary btn-full" style={{marginTop: '15px'}} onClick={() => onNavigate('home')}>← Back to Home</button>
                 </div>
             </div>
@@ -109,10 +117,9 @@ export default function AdminPage({ onNavigate }) {
             <div style={styles.sidebar}>
                 <div style={{ marginBottom: '30px', fontSize: '1.2rem' }}>🎓 <strong>Uni-Vote Admin</strong></div>
 
-                {/* NEW NAVIGATION BUTTON TO EXIT ADMIN PANEL */}
                 <button
                     className="btn btn-secondary btn-sm"
-                    style={{ marginBottom: '20px', justifyContent: 'center' }}
+                    style={{ marginBottom: '20px', justifyContent: 'center', width: '100%' }}
                     onClick={() => onNavigate('home')}
                 >
                     🏠 Exit to Portal
@@ -130,7 +137,6 @@ export default function AdminPage({ onNavigate }) {
             </div>
 
             <div style={styles.main}>
-                {/* TAB 1: OVERVIEW */}
                 {tab === 'overview' && (
                     <div className="fade-up">
                         <h1 style={{marginBottom: '30px', fontFamily: 'var(--font-display)'}}>Candidate Infrastructure</h1>
@@ -157,6 +163,7 @@ export default function AdminPage({ onNavigate }) {
                                 <button className="btn btn-primary btn-full" style={{marginTop: '15px'}} type="submit">Publish Candidate to Ballot</button>
                             </form>
                         </div>
+                        {candidates.length === 0 && !loading && <p style={{textAlign: 'center', color: 'var(--muted)'}}>No candidates on the ballot yet.</p>}
                         {candidates.map(c => (
                             <div key={c.id} className="card" style={styles.candidateItem}>
                                 <div>
@@ -178,7 +185,6 @@ export default function AdminPage({ onNavigate }) {
                     </div>
                 )}
 
-                {/* TAB 2: VOTER REGISTRY */}
                 {tab === 'voters' && (
                     <div className="fade-up">
                         <h1 style={{marginBottom: '20px', fontFamily: 'var(--font-display)'}}>Voter Registry</h1>
@@ -208,7 +214,6 @@ export default function AdminPage({ onNavigate }) {
                     </div>
                 )}
 
-                {/* TAB 3: PHASE CONTROL */}
                 {tab === 'control' && (
                     <div className="fade-up">
                         <h1 style={{marginBottom: '30px', fontFamily: 'var(--font-display)'}}>Phase Control</h1>
@@ -233,8 +238,8 @@ const styles = {
     page: { display: 'flex', minHeight: '100vh', background: 'var(--navy)' },
     sidebar: { width: '260px', background: 'rgba(0,0,0,0.3)', padding: '40px 25px', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column' },
     main: { flex: 1, padding: '50px', overflowY: 'auto' },
-    tab: { background: 'none', border: 'none', color: 'var(--muted)', textAlign: 'left', padding: '15px', cursor: 'pointer', borderRadius: '10px', marginBottom: '5px' },
-    activeTab: { background: 'rgba(240,165,0,0.1)', borderLeft: '4px solid var(--accent)', color: 'var(--accent)', textAlign: 'left', padding: '15px', fontWeight: 'bold', borderRadius: '10px', marginBottom: '5px' },
+    tab: { background: 'none', border: 'none', color: 'var(--muted)', textAlign: 'left', padding: '15px', cursor: 'pointer', borderRadius: '10px', marginBottom: '5px', width: '100%' },
+    activeTab: { background: 'rgba(240,165,0,0.1)', borderLeft: '4px solid var(--accent)', color: 'var(--accent)', textAlign: 'left', padding: '15px', fontWeight: 'bold', borderRadius: '10px', marginBottom: '5px', width: '100%' },
     candidateForm: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' },
     candidateItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', border: '1px solid rgba(255,255,255,0.05)', padding: '20px' },
     table: { width: '100%', borderCollapse: 'collapse' },
