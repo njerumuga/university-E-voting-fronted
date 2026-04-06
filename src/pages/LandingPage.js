@@ -1,18 +1,31 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useVoting, PHASES } from '../context/VotingContext';
 
 export default function LandingPage({ onNavigate }) {
     const { phase } = useVoting();
+    const [showAdminAccess, setShowAdminAccess] = useState(false);
+
+    // --- SECRET ADMIN TRIGGER ---
+    // Press Shift + A to reveal the dashboard button at the bottom
+    useEffect(() => {
+        const handleKeyDown = (e) => {
+            if (e.shiftKey && e.key === 'A') {
+                setShowAdminAccess(prev => !prev);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, []);
 
     return (
         <div style={styles.container}>
-            {/* Background decoration */}
+            {/* Background decoration - EXACTLY AS ORIGINAL */}
             <div style={styles.bgGlow} />
             <div style={styles.bgGrid} />
 
             <div style={styles.hero}>
                 <div className="fade-up" style={styles.pill}>
-                    <span style={styles.pillDot} /> University E-Voting Portal 2026
+                    <span style={styles.pillDot} /> University Student E-Voting System 2026
                 </div>
 
                 <h1 className="fade-up-1" style={styles.title}>
@@ -69,7 +82,7 @@ export default function LandingPage({ onNavigate }) {
                 </div>
             </div>
 
-            {/* Feature cards */}
+            {/* Feature cards - EXACTLY AS ORIGINAL */}
             <div style={styles.features}>
                 {[
                     { icon: '🏛️', title: 'Faculty Specific', desc: 'Ballots are automatically filtered by your specific University School or Faculty.' },
@@ -80,20 +93,23 @@ export default function LandingPage({ onNavigate }) {
                     <div key={i} className="card" style={styles.featureCard}>
                         <div style={styles.featureIcon}>{f.icon}</div>
                         <h3 style={styles.featureTitle}>{f.title}</h3>
-                        <p style={{ color: 'var(--muted)', fontSize: '0.88rem', lineHeight: 1.6 }}>{f.desc}</p>
+                        <p style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.88rem', lineHeight: 1.6 }}>{f.desc}</p>
                     </div>
                 ))}
             </div>
 
-            <div style={styles.adminLink}>
-                <button
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => onNavigate('admin')}
-                    style={{ opacity: 0.6, fontSize: '0.75rem' }}
-                >
-                    🛡️ COMMISSIONER DASHBOARD
-                </button>
-            </div>
+            {/* HIDDEN ADMIN LINK - Only shows on Shift + A */}
+            {showAdminAccess && (
+                <div style={styles.adminLink}>
+                    <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => onNavigate('admin')}
+                        style={{ opacity: 0.8, fontSize: '0.75rem' }}
+                    >
+                        🛡️ COMMISSIONER DASHBOARD
+                    </button>
+                </div>
+            )}
         </div>
     );
 }
@@ -107,7 +123,7 @@ const styles = {
         padding: '60px 20px',
         position: 'relative',
         overflow: 'hidden',
-        background: 'var(--navy)'
+        background: 'var(--primary-green)' // Updated to your green theme
     },
     bgGlow: {
         position: 'fixed',
@@ -116,14 +132,14 @@ const styles = {
         transform: 'translateX(-50%)',
         width: '800px',
         height: '800px',
-        background: 'radial-gradient(circle, rgba(240,165,0,0.07) 0%, transparent 70%)',
+        background: 'radial-gradient(circle, rgba(255,204,0,0.15) 0%, transparent 70%)',
         pointerEvents: 'none',
         zIndex: 0,
     },
     bgGrid: {
         position: 'fixed',
         inset: 0,
-        backgroundImage: `linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px)`,
+        backgroundImage: `linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)`,
         backgroundSize: '50px 50px',
         pointerEvents: 'none',
         zIndex: 0,
@@ -139,13 +155,13 @@ const styles = {
         display: 'inline-flex',
         alignItems: 'center',
         gap: 8,
-        background: 'rgba(240,165,0,0.1)',
-        border: '1px solid rgba(240,165,0,0.2)',
+        background: 'rgba(255,204,0,0.1)',
+        border: '1px solid rgba(255,204,0,0.2)',
         borderRadius: 30,
         padding: '8px 20px',
         fontSize: '0.85rem',
         fontWeight: 600,
-        color: 'var(--accent)',
+        color: 'var(--accent-gold)',
         textTransform: 'uppercase',
         letterSpacing: '0.05em',
         marginBottom: 32,
@@ -154,7 +170,7 @@ const styles = {
         width: 8,
         height: 8,
         borderRadius: '50%',
-        background: 'var(--accent)',
+        background: 'var(--accent-gold)',
         display: 'inline-block',
     },
     title: {
@@ -163,16 +179,16 @@ const styles = {
         fontWeight: 900,
         lineHeight: 1.05,
         marginBottom: 24,
-        color: 'var(--white)',
+        color: 'white',
         letterSpacing: '-0.02em'
     },
     titleAccent: {
-        color: 'var(--accent)',
+        color: 'var(--accent-gold)',
         display: 'block',
     },
     subtitle: {
         fontSize: '1.15rem',
-        color: 'var(--muted)',
+        color: 'rgba(255,255,255,0.8)',
         lineHeight: 1.6,
         marginBottom: 48,
         maxWidth: '580px',
@@ -197,8 +213,9 @@ const styles = {
     featureCard: {
         textAlign: 'center',
         padding: '35px 25px',
-        background: 'rgba(255,255,255,0.03)',
-        border: '1px solid var(--border)',
+        background: 'rgba(0,0,0,0.2)',
+        backdropFilter: 'blur(10px)',
+        border: '1px solid rgba(255,255,255,0.1)',
         borderRadius: '16px'
     },
     featureIcon: {
@@ -209,7 +226,7 @@ const styles = {
         fontFamily: 'var(--font-display)',
         fontSize: '1.1rem',
         marginBottom: 10,
-        color: 'var(--white)',
+        color: 'white',
         fontWeight: 700
     },
     adminLink: {

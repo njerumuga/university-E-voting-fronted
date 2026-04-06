@@ -1,159 +1,170 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 const VotingContext = createContext();
+const API_BASE_URL = 'http://localhost:8080/api'; 
 
-const API_BASE_URL = window.location.hostname === 'localhost' 
-    ? 'http://localhost:8080/api/voters' 
-    : 'https://university-e-voting-backend.onrender.com/api/voters';
-
-export const PHASES = {
-    REGISTRATION: 'registration',
-    VOTING: 'voting',
-    CLOSED: 'closed',
-};
+export const PHASES = { REGISTRATION: 'registration', VOTING: 'voting', CLOSED: 'closed' };
 
 export function VotingProvider({ children }) {
     const [phase, setPhase] = useState(PHASES.REGISTRATION);
     const [candidates, setCandidates] = useState([]);
-    const [currentVoter, setCurrentVoter] = useState(null);
+    const [user, setUser] = useState(null); 
     const [adminLoggedIn, setAdminLoggedIn] = useState(false);
 
-    // --- UPDATED: FETCH PHASE FROM DATABASE AS JSON ---
-    const fetchElectionPhase = useCallback(async () => {
+    const restoreUser = useCallback(async (token) => {
+        if (!token) return;
         try {
-            const res = await fetch(`${API_BASE_URL}/settings/phase`);
+            const res = await fetch(`${API_BASE_URL}/voters/me`, { 
+                headers: { 'Authorization': `Bearer ${token}` } 
+            });
             if (res.ok) {
-                const data = await res.json(); // Changed from .text() to .json()
-                setPhase(data.phase); // Access the 'phase' key from the Map/JSON
+                const userData = await res.json();
+                setUser(userData);
+            } else {
+                localStorage.clear();
             }
-        } catch (err) { 
-            console.error("Could not sync election phase. Server might be down.", err); 
-        }
+        } catch (err) { console.error("Session restore failed"); }
     }, []);
 
-    // --- UPDATED: SAVE PHASE TO DATABASE ---
-    const setElectionPhase = async (newPhase) => {
-        setPhase(newPhase); // Update UI immediately for responsiveness
+    const fetchElectionStatus = useCallback(async () => {
         try {
-            await fetch(`${API_BASE_URL}/settings/phase`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phase: newPhase }),
-            });
-        } catch (err) { 
-            console.error("Failed to save phase to database", err); 
-        }
-    };
+            const res = await fetch(`${API_BASE_URL}/voters/settings/phase`); 
+            if (res.ok) {
+                const data = await res.json();
+                if (data.phase) setPhase(data.phase.toLowerCase());
+            }
+        } catch (err) { console.error("Phase fetch failed"); }
+    }, []);
 
-    const fetchCandidates = useCallback(async (token) => {
-        const activeToken = token || localStorage.getItem('voter_token');
-        if (!activeToken) return;
-        
+    const fetchCandidates = useCallback(async () => {
+        const token = localStorage.getItem('admin_token') || localStorage.getItem('voter_token');
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
         try {
-            const response = await fetch(`${API_BASE_URL}/candidates`, {
-                headers: { 'Authorization': `Bearer ${activeToken}` }
-            });
-            if (response.ok) {
-                const data = await response.json();
+            const res = await fetch(`${API_BASE_URL}/candidates`, { headers });
+            if (res.ok) {
+                const data = await res.json();
                 setCandidates(data);
             }
-        } catch (err) { console.error("Fetch candidates failed", err); }
+        } catch (err) { console.error("Candidates fetch failed"); }
     }, []);
 
-    const fetchCurrentVoter = useCallback(async (token) => {
+    const fetchMyCandidates = useCallback(async (token) => {
         try {
-            const res = await fetch(`${API_BASE_URL}/me`, {
+            const res = await fetch(`${API_BASE_URL}/voters/candidates`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
-                const voterData = await res.json();
-                setCurrentVoter(voterData);
-                fetchCandidates(token); 
-            } else {
-                localStorage.removeItem('voter_token');
-                setCurrentVoter(null);
+                const data = await res.json();
+                setCandidates(data);
             }
-        } catch (err) { console.error("Failed to fetch user profile.", err); }
-    }, [fetchCandidates]);
-
-    useEffect(() => {
-        fetchElectionPhase(); // Global sync on load
-        
-        const vToken = localStorage.getItem('voter_token');
-        const aToken = localStorage.getItem('admin_token');
-        
-        if (vToken) fetchCurrentVoter(vToken);
-        if (aToken) setAdminLoggedIn(true);
-    }, [fetchElectionPhase, fetchCurrentVoter]);
+        } catch (err) { console.error("School filter failed"); }
+    }, []);
 
     const registerVoter = async (formData) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/register`, {
+            const res = await fetch(`${API_BASE_URL}/voters/register`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    name: formData.fullName,
+                    name: formData.fullName || formData.name,
                     admissionNumber: formData.admissionNumber,
-                    email: formData.email,
-                    school: formData.school,
-                    course: formData.course,
-                    yearOfStudy: formData.year,
-                    password: formData.password
+                    email: formData.email || `${formData.admissionNumber}@univote.com`,
+                    school: formData.school || "General",
+                    course: formData.course || "N/A",
+                    yearOfStudy: formData.year ? formData.year.toString() : "1",
+                    password: formData.password,
+                    // Send both to ensure Java maps the boolean correctly
+                    isAdmin: formData.isAdmin === true,
+                    admin: formData.isAdmin === true 
                 }),
             });
-            return { success: response.ok };
-        } catch (err) { return { success: false, message: 'Server unreachable.' }; }
+            if (res.ok) return { success: true };
+            const errorMsg = await res.text();
+            return { success: false, message: errorMsg };
+        } catch (err) { return { success: false, message: "Server connection error" }; }
     };
 
     const loginVoter = async (admissionNumber, password) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/login`, { 
+            const res = await fetch(`${API_BASE_URL}/voters/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ admissionNumber, password }),
             });
-            if (response.ok) {
-                const token = await response.text();
+            if (res.ok) {
+                const token = await res.text();
                 localStorage.setItem('voter_token', token);
-                await fetchCurrentVoter(token);
+                await restoreUser(token);
+                await fetchMyCandidates(token);
                 return { success: true };
             }
-            return { success: false, message: 'Invalid credentials.' };
-        } catch (err) { return { success: false, message: 'Connection error.' }; }
+            return { success: false, message: "Invalid Credentials" };
+        } catch (err) { return { success: false, message: "Server error" }; }
     };
 
     const adminLogin = async (username, password) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/login`, {
+            const res = await fetch(`${API_BASE_URL}/voters/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ admissionNumber: username, password }),
             });
-            if (response.ok) {
-                const token = await response.text();
+            if (res.ok) {
+                const token = await res.text();
                 localStorage.setItem('admin_token', token);
                 setAdminLoggedIn(true);
+                await restoreUser(token);
+                await fetchCandidates();
                 return { success: true };
             }
-            return { success: false, message: 'Invalid admin credentials.' };
-        } catch (err) { return { success: false, message: 'Server error.' }; }
+            return { success: false };
+        } catch (err) { return { success: false }; }
     };
 
-    const castVote = async (payload) => {
+    const castVote = async (voteData) => {
         const token = localStorage.getItem('voter_token');
-        const candidateId = payload.selection || payload.candidateId;
+        if (!token) return { success: false, message: "Session expired." };
         try {
-            const response = await fetch(`${API_BASE_URL}/vote`, {
+            const res = await fetch(`${API_BASE_URL}/voters/vote`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
+                headers: { 
+                    'Content-Type': 'application/json', 
+                    'Authorization': `Bearer ${token}` 
                 },
-                body: JSON.stringify({ candidateId: parseInt(candidateId) }),
+                body: JSON.stringify({ candidateId: voteData.candidateId })
             });
-            if (response.ok) {
-                setCurrentVoter(prev => ({ ...prev, hasVoted: true }));
-                fetchCandidates(token); // Refresh local tally after voting
+            if (res.ok) return { success: true };
+            const errorText = await res.text();
+            return { success: false, message: errorText || "Vote rejected." };
+        } catch (err) { return { success: false, message: "Server unreachable" }; }
+    };
+
+    const setElectionPhase = async (newPhase) => {
+        const token = localStorage.getItem('admin_token');
+        try {
+            const res = await fetch(`${API_BASE_URL}/voters/settings/phase`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ phase: newPhase })
+            });
+            if (res.ok) {
+                setPhase(newPhase.toLowerCase());
+                return true;
+            }
+            return false;
+        } catch (err) { return false; }
+    };
+
+    const resetElection = async () => {
+        const token = localStorage.getItem('admin_token');
+        try {
+            const res = await fetch(`${API_BASE_URL}/voters/admin/reset-election`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                await fetchElectionStatus();
+                await fetchCandidates();
                 return { success: true };
             }
             return { success: false };
@@ -161,16 +172,33 @@ export function VotingProvider({ children }) {
     };
 
     const adminLogout = () => {
-        localStorage.removeItem('admin_token');
-        localStorage.removeItem('voter_token');
+        localStorage.clear();
         setAdminLoggedIn(false);
-        setCurrentVoter(null);
+        setUser(null);
+        window.location.reload(); 
     };
+
+    useEffect(() => {
+        fetchElectionStatus();
+        const aToken = localStorage.getItem('admin_token');
+        const vToken = localStorage.getItem('voter_token');
+        if (aToken) {
+            setAdminLoggedIn(true);
+            restoreUser(aToken);
+            fetchCandidates();
+        } else if (vToken) {
+            restoreUser(vToken);
+            fetchMyCandidates(vToken);
+        } else {
+            fetchCandidates();
+        }
+    }, [fetchCandidates, fetchElectionStatus, restoreUser, fetchMyCandidates]);
 
     return (
         <VotingContext.Provider value={{
-            phase, setElectionPhase, candidates, currentVoter, adminLoggedIn,
-            registerVoter, loginVoter, adminLogin, castVote, adminLogout
+            phase, candidates, user, adminLoggedIn, 
+            adminLogin, adminLogout, loginVoter, fetchCandidates, 
+            setElectionPhase, resetElection, registerVoter, fetchMyCandidates, castVote
         }}>
             {children}
         </VotingContext.Provider>

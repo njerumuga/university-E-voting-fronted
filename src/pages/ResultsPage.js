@@ -1,119 +1,88 @@
-import React, { useEffect, useState } from 'react';
-import { useVoting, PHASES } from '../context/VotingContext';
+import React, { useEffect } from 'react';
+import { useVoting } from '../context/VotingContext';
 
 export default function ResultsPage({ onNavigate }) {
-    // Note: Ensure your VotingContext exports a refresh function or candidates update automatically
-    const { phase, candidates } = useVoting(); 
-    const [groupedResults, setGroupedResults] = useState({});
+    const { candidates = [], fetchCandidates } = useVoting();
 
     useEffect(() => {
-        // Group and Sort Logic
-        const groups = candidates.reduce((acc, c) => {
-            const school = c.school || 'General';
-            const pos = c.position || 'General Seat';
+        fetchCandidates();
+    }, [fetchCandidates]);
 
-            if (!acc[school]) acc[school] = {};
-            if (!acc[school][pos]) acc[school][pos] = [];
-
-            acc[school][pos].push(c);
-            return acc;
-        }, {});
-
-        Object.keys(groups).forEach(school => {
-            Object.keys(groups[school]).forEach(pos => {
-                groups[school][pos].sort((a, b) => (b.voteCount || 0) - (a.voteCount || 0));
-            });
-        });
-
-        setGroupedResults(groups);
-    }, [candidates]);
-
-    // OPTIONAL: If your context doesn't auto-refresh, you can add a local fetch here
-    // useEffect(() => {
-    //    const interval = setInterval(() => { /* logic to fetch candidates */ }, 5000);
-    //    return () => clearInterval(interval);
-    // }, []);
+    // Grouping logic: ensures candidates show up even if votes are 0
+    const groupedResults = (candidates || []).reduce((acc, curr) => {
+        const pos = curr.position || 'General Positions';
+        if (!acc[pos]) acc[pos] = [];
+        acc[pos].push(curr);
+        return acc;
+    }, {});
 
     return (
-        <div style={styles.page}>
+        <div style={styles.container}>
             <div style={styles.header}>
-                <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('home')}>← Exit Results</button>
-                <h1 style={styles.mainTitle}>
-                    {phase === PHASES.CLOSED ? '🏁 Final Certification' : '📊 Live Tally'}
-                </h1>
-                <div style={styles.statusBadge}>
-                    {phase.toUpperCase()}
-                </div>
+                <button className="btn btn-secondary btn-sm" onClick={() => onNavigate('home')}>← EXIT</button>
+                <h1 style={{ fontSize: '2.5rem', fontWeight: 900, marginTop: '20px' }}>🏁 Final Results</h1>
+                <p style={{ opacity: 0.6 }}>Official Live Election Standing</p>
             </div>
 
-            {Object.keys(groupedResults).length > 0 ? (
-                Object.entries(groupedResults).map(([school, positions]) => (
-                    <div key={school} style={{ marginBottom: '50px' }}>
-                        <h2 style={styles.schoolHeader}>📍 {school.toUpperCase()}</h2>
+            <div style={styles.resultsGrid}>
+                {Object.keys(groupedResults).length > 0 ? (
+                    Object.entries(groupedResults).map(([position, list]) => {
+                        const totalVotes = list.reduce((sum, c) => sum + (c.voteCount || c.vote_count || 0), 0);
+                        
+                        const sortedList = [...list].sort((a, b) => 
+                            (b.voteCount || b.vote_count || 0) - (a.voteCount || a.vote_count || 0)
+                        );
 
-                        {Object.entries(positions).map(([pos, list]) => (
-                            <div key={pos} style={{ marginBottom: '30px' }}>
-                                <h3 style={styles.posTitle}>{pos}</h3>
-                                <div style={styles.grid}>
-                                    {list.map((c, index) => (
-                                        <div
-                                            key={c.id}
-                                            className="card"
-                                            style={{
-                                                ...styles.resultCard,
-                                                borderColor: index === 0 && c.voteCount > 0 ? 'var(--green)' : 'var(--border)',
-                                                background: index === 0 && c.voteCount > 0 ? 'rgba(0, 255, 136, 0.03)' : 'var(--card)'
-                                            }}
-                                        >
-                                            <div style={styles.leftInfo}>
-                                                <div style={styles.rank}>#{index + 1}</div>
-                                                <div>
-                                                    <div style={styles.name}>
-                                                        {c.name}
-                                                        {index === 0 && c.voteCount > 0 && <span title="Leading" style={{marginLeft: '10px'}}>👑</span>}
-                                                    </div>
-                                                    <div className="text-muted" style={{fontSize: '0.8rem'}}>{c.party}</div>
+                        return (
+                            <div key={position} className="glass-card" style={styles.categoryCard}>
+                                <h3 style={styles.posTitle}>{position.toUpperCase()}</h3>
+                                <small style={{opacity: 0.5}}>{totalVotes} Total Votes Cast</small>
+                                
+                                <div style={{ marginTop: '20px' }}>
+                                    {sortedList.map((cand, index) => {
+                                        const votes = cand.voteCount || cand.vote_count || 0;
+                                        const percentage = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0;
+                                        
+                                        return (
+                                            <div key={cand.id} style={{ marginBottom: '20px' }}>
+                                                <div style={styles.labelRow}>
+                                                    <span>
+                                                        {index === 0 && votes > 0 ? '👑 ' : ''}
+                                                        {cand.name}
+                                                    </span>
+                                                    <strong>{votes} votes ({percentage}%)</strong>
+                                                </div>
+                                                <div style={styles.barBg}>
+                                                    <div style={{ 
+                                                        ...styles.barFill, 
+                                                        width: `${percentage}%`,
+                                                        background: index === 0 && votes > 0 ? '#ffcc00' : '#00ff88' 
+                                                    }} />
                                                 </div>
                                             </div>
-                                            <div style={styles.rightStats}>
-                                                <div style={{...styles.voteCount, color: index === 0 && c.voteCount > 0 ? 'var(--green)' : 'var(--white)'}}>
-                                                    {c.voteCount || 0}
-                                                </div>
-                                                <div style={styles.voteLabel}>TOTAL VOTES</div>
-                                            </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </div>
-                        ))}
+                        );
+                    })
+                ) : (
+                    <div className="glass-card" style={{ textAlign: 'center', padding: '60px' }}>
+                        <p>⌛ Waiting for live election data...</p>
                     </div>
-                ))
-            ) : (
-                <div className="card" style={{ textAlign: 'center', padding: '60px' }}>
-                    <p className="text-muted">The ballot boxes are currently empty.</p>
-                </div>
-            )}
-
-            <div style={{textAlign: 'center', paddingBottom: '60px'}}>
-                <button className="btn btn-primary btn-lg" onClick={() => onNavigate('home')}>Return to Portal Home</button>
+                )}
             </div>
         </div>
     );
 }
 
 const styles = {
-    page: { padding: '40px 20px', maxWidth: '900px', margin: '0 auto', minHeight: '100vh' },
-    header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '50px' },
-    mainTitle: { fontFamily: 'var(--font-display)', margin: 0, fontSize: '2rem', letterSpacing: '-0.02em' },
-    statusBadge: { padding: '6px 12px', background: 'var(--accent)', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 900, color: 'var(--navy)' },
-    schoolHeader: { borderLeft: '4px solid var(--accent)', paddingLeft: '15px', color: 'var(--accent)', marginBottom: '25px', fontSize: '1.2rem' },
-    posTitle: { fontSize: '0.8rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '15px' },
-    grid: { display: 'flex', flexDirection: 'column', gap: '10px' },
-    resultCard: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '18px 25px', borderWidth: '1px' },
-    leftInfo: { display: 'flex', alignItems: 'center', gap: '20px' },
-    rank: { fontSize: '1.2rem', fontWeight: 900, color: 'rgba(255,255,255,0.1)', width: '30px' },
-    name: { fontSize: '1.1rem', fontWeight: 600, color: 'var(--white)' },
-    rightStats: { textAlign: 'right' },
-    voteCount: { fontSize: '1.4rem', fontWeight: 800 },
-    voteLabel: { fontSize: '0.6rem', color: 'var(--muted)', letterSpacing: '0.05em' }
+    container: { minHeight: '100vh', padding: '60px 20px', background: 'var(--primary-green)', color: 'white' },
+    header: { textAlign: 'center', marginBottom: '50px' },
+    resultsGrid: { maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '25px' },
+    categoryCard: { padding: '30px', borderRadius: '20px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' },
+    posTitle: { color: 'var(--accent-gold)', letterSpacing: '2px', margin: 0, fontSize: '1.1rem', fontWeight: '800' },
+    labelRow: { display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '0.95rem' },
+    barBg: { background: 'rgba(255,255,255,0.1)', height: '10px', borderRadius: '5px', overflow: 'hidden' },
+    barFill: { height: '100%', borderRadius: '5px', transition: 'width 1.5s cubic-bezier(0.4, 0, 0.2, 1)' }
 };

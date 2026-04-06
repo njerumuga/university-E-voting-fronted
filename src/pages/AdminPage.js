@@ -1,250 +1,330 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useVoting, PHASES } from '../context/VotingContext';
 
 export default function AdminPage({ onNavigate }) {
-    const { adminLoggedIn, adminLogin, adminLogout, phase, setElectionPhase } = useVoting();
+    const { 
+        adminLoggedIn, adminLogin, adminLogout, 
+        phase, setElectionPhase, candidates, 
+        fetchCandidates, registerVoter, resetElection 
+    } = useVoting();
+    
     const [voters, setVoters] = useState([]);
-    const [candidates, setCandidates] = useState([]);
-    const [tab, setTab] = useState('overview');
+    const [tab, setTab] = useState('overview'); 
     const [loading, setLoading] = useState(false);
-    const [searchTerm, setSearchTerm] = useState('');
-
-    const [newCandidate, setNewCandidate] = useState({ name: '', party: '', school: '', position: '' });
     const [creds, setCreds] = useState({ username: '', password: '' });
-    const [loginError, setLoginError] = useState('');
+    
+    const [showAddCandidate, setShowAddCandidate] = useState(false);
+    const [newCandidate, setNewCandidate] = useState({ name: '', party: '', school: '', position: '' });
+    const [newAdmin, setNewAdmin] = useState({ name: '', admissionNumber: '', password: '', school: 'Administration' });
 
-    // --- DYNAMIC API URL CONFIGURATION ---
-    const BASE_URL = window.location.hostname === 'localhost' 
-        ? 'http://localhost:8080/api' 
-        : 'https://university-e-voting-backend.onrender.com/api';
+    const BASE_URL = 'http://localhost:8080/api';
 
-    useEffect(() => {
-        if (adminLoggedIn) fetchAdminData();
-    }, [adminLoggedIn]);
-
-    const fetchAdminData = async () => {
-        setLoading(true);
+    // Fetch all registry data from the database
+    const refreshData = useCallback(async () => {
         const token = localStorage.getItem('admin_token');
-        const headers = { 'Authorization': `Bearer ${token}` };
+        if (!token) return;
+        setLoading(true);
+        await fetchCandidates();
         try {
-            const [vRes, cRes] = await Promise.all([
-                fetch(`${BASE_URL}/admin/voters`, { headers }),
-                fetch(`${BASE_URL}/admin/results`, { headers })
-            ]);
-            if (vRes.ok) setVoters(await vRes.json());
-            if (cRes.ok) setCandidates(await cRes.json());
-        } catch (err) { 
-            console.error("Admin API Error: Server might be waking up...", err); 
+            const vRes = await fetch(`${BASE_URL}/admin/voters`, { 
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' } 
+            });
+            if (vRes.ok) {
+                const data = await vRes.json();
+                setVoters(data);
+            }
+        } catch (err) { console.error("Registry fetch failed", err); }
+        setLoading(false);
+    }, [fetchCandidates]);
+
+    useEffect(() => { if (adminLoggedIn) refreshData(); }, [adminLoggedIn, refreshData]);
+
+    const handleDeleteCandidate = async (id) => {
+        if (!window.confirm("Are you sure?")) return;
+        const token = localStorage.getItem('admin_token');
+        setLoading(true);
+        try {
+            const res = await fetch(`${BASE_URL}/admin/candidates/${id}`, {
+                method: 'DELETE',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                alert("Deleted successfully");
+                await refreshData();
+            }
+        } catch (err) { alert("Network error"); }
+        setLoading(false);
+    };
+
+    const handleAddAdmin = async (e) => {
+        e.preventDefault();
+        setLoading(true);
+        
+        // This ensures the new user is saved with Admin privileges in the DB
+        const res = await registerVoter({ 
+            fullName: newAdmin.name, 
+            admissionNumber: newAdmin.admissionNumber, 
+            password: newAdmin.password, 
+            school: 'Administration',
+            isAdmin: true 
+        });
+
+        if (res.success) {
+            alert("New Admin Authorized! Access granted for " + newAdmin.admissionNumber);
+            setNewAdmin({ name: '', admissionNumber: '', password: '', school: 'Administration' });
+            await refreshData(); 
+        } else { 
+            alert("Error: " + res.message); 
         }
         setLoading(false);
     };
 
     const handleAddCandidate = async (e) => {
         e.preventDefault();
-        const token = localStorage.getItem('admin_token');
-        const res = await fetch(`${BASE_URL}/admin/candidates`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify(newCandidate)
-        });
-        if (res.ok) {
-            setNewCandidate({ name: '', party: '', school: '', position: '' });
-            fetchAdminData();
-        }
-    };
-
-    const handleDeleteCandidate = async (id) => {
-        if (!window.confirm("Permanent Action: Delete candidate from server?")) return;
-        const token = localStorage.getItem('admin_token');
-        await fetch(`${BASE_URL}/admin/candidates/${id}`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${token}` }
-        });
-        fetchAdminData();
-    };
-
-    const handlePhaseChange = (newPhase) => {
-        setElectionPhase(newPhase);
-        alert(`System Alert: Election has been moved to the ${newPhase} phase.`);
-    };
-
-    const handleLogin = async (e) => {
-        e.preventDefault();
         setLoading(true);
-        const res = await adminLogin(creds.username, creds.password);
+        const token = localStorage.getItem('admin_token');
+        try {
+            const res = await fetch(`${BASE_URL}/admin/candidates`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ ...newCandidate, voteCount: 0 })
+            });
+            if (res.ok) {
+                await fetchCandidates(); 
+                setNewCandidate({ name: '', party: '', school: '', position: '' });
+                setShowAddCandidate(false); 
+                alert("Candidate added!");
+            }
+        } catch (err) { alert("Backend unreachable"); }
         setLoading(false);
-        if (!res.success) setLoginError(res.message);
     };
 
-    const selectStyle = { backgroundColor: '#1f2937', color: 'white', border: '1px solid var(--border)', padding: '10px', borderRadius: '8px' };
+    const groupedCandidates = candidates.reduce((acc, curr) => {
+        if (!acc[curr.position]) acc[curr.position] = [];
+        acc[curr.position].push(curr);
+        return acc;
+    }, {});
 
-    const filteredVoters = voters.filter(v =>
-        (v.admissionNumber && v.admissionNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (v.name && v.name.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+    // Helper: Identify admins by checking all possible naming conventions from Backend/DB
+    const systemAdmins = voters.filter(v => v.isAdmin === true || v.is_admin === true || v.admin === true);
 
     if (!adminLoggedIn) {
         return (
             <div style={styles.loginCenter}>
-                <div className="card" style={{ width: '100%', maxWidth: '420px', padding: '50px' }}>
-                    <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-                        <div style={{ fontSize: '3.5rem' }}>🛡️</div>
-                        <h2 style={{ fontFamily: 'var(--font-display)', marginTop: 15 }}>Commissioner Access</h2>
-                        <p className="text-muted">University Election Control</p>
-                    </div>
-                    {loginError && <div className="alert alert-error">{loginError}</div>}
-                    <form onSubmit={handleLogin}>
-                        <div className="form-group">
-                            <label className="form-label">Admin ID</label>
-                            <input className="form-input" value={creds.username} onChange={e => setCreds({...creds, username: e.target.value})} required />
-                        </div>
-                        <div className="form-group">
-                            <label className="form-label">Secret Key</label>
-                            <input className="form-input" type="password" value={creds.password} onChange={e => setCreds({...creds, password: e.target.value})} required />
-                        </div>
-                        <button className="btn btn-primary btn-full btn-lg" type="submit" disabled={loading}>
-                            {loading ? 'Waking Server...' : 'Unlock Dashboard'}
+                <div className="glass-card" style={{ width: '400px', padding: '40px' }}>
+                    <h2 style={{ textAlign: 'center', marginBottom: '30px', color: 'white' }}>🛡️ Admin Panel</h2>
+                    <form onSubmit={(e) => { e.preventDefault(); adminLogin(creds.username, creds.password); }}>
+                        <input className="form-input" style={{marginBottom: 15}} placeholder="Admin ID" onChange={e => setCreds({...creds, username: e.target.value})} required />
+                        <input className="form-input" style={{marginBottom: 20}} type="password" placeholder="Secret Key" onChange={e => setCreds({...creds, password: e.target.value})} required />
+                        <button className="btn btn-primary" style={{width: '100%'}} disabled={loading}>
+                            {loading ? 'Verifying...' : 'Unlock Dashboard'}
                         </button>
                     </form>
-                    <button className="btn btn-secondary btn-full" style={{marginTop: '15px'}} onClick={() => onNavigate('home')}>← Back to Home</button>
                 </div>
             </div>
         );
     }
 
     return (
-        <div style={styles.page}>
-            <div style={styles.sidebar}>
-                <div style={{ marginBottom: '30px', fontSize: '1.2rem' }}>🎓 <strong>Uni-Vote Admin</strong></div>
+        <div style={styles.layout}>
+            <aside style={styles.sidebar}>
+                <div style={{ marginBottom: '40px' }}><h2 style={{ fontSize: '1.2rem', fontWeight: 800 }}>Uni-Vote Admin</h2></div>
+                <button style={tab === 'overview' ? {...styles.navBtn, ...styles.activeTab} : styles.navBtn} onClick={() => setTab('overview')}>📊 Overview</button>
+                <button style={tab === 'voters' ? {...styles.navBtn, ...styles.activeTab} : styles.navBtn} onClick={() => setTab('voters')}>👥 Voters</button>
+                <button style={tab === 'candidates' ? {...styles.navBtn, ...styles.activeTab} : styles.navBtn} onClick={() => setTab('candidates')}>🎭 Candidates</button>
+                <button style={tab === 'results' ? {...styles.navBtn, ...styles.activeTab} : styles.navBtn} onClick={() => setTab('results')}>📈 Results</button>
+                <button style={tab === 'control' ? {...styles.navBtn, ...styles.activeTab} : styles.navBtn} onClick={() => setTab('control')}>⚙️ Control</button>
+                <button style={tab === 'admins' ? {...styles.navBtn, ...styles.activeTab} : styles.navBtn} onClick={() => setTab('admins')}>🛡️ Admins</button>
+                <div style={{ marginTop: 'auto' }}><button className="btn btn-primary btn-full" style={{background: '#ffcc00', color: '#000'}} onClick={adminLogout}>LOGOUT</button></div>
+            </aside>
 
-                <button
-                    className="btn btn-secondary btn-sm"
-                    style={{ marginBottom: '20px', justifyContent: 'center', width: '100%' }}
-                    onClick={() => onNavigate('home')}
-                >
-                    🏠 Exit to Portal
-                </button>
-
-                <hr style={{ border: 'none', borderTop: '1px solid var(--border)', marginBottom: '20px' }} />
-
-                <button style={tab === 'overview' ? styles.activeTab : styles.tab} onClick={() => setTab('overview')}>📊 Ballot Manager</button>
-                <button style={tab === 'voters' ? styles.activeTab : styles.tab} onClick={() => setTab('voters')}>👥 Voter Registry</button>
-                <button style={tab === 'control' ? styles.activeTab : styles.tab} onClick={() => setTab('control')}>⚙️ Phase Control</button>
-
-                <div style={{marginTop: 'auto'}}>
-                    <button className="btn btn-danger btn-sm btn-full" onClick={adminLogout}>Logout System</button>
-                </div>
-            </div>
-
-            <div style={styles.main}>
+            <main style={styles.mainContent}>
                 {tab === 'overview' && (
                     <div className="fade-up">
-                        <h1 style={{marginBottom: '30px', fontFamily: 'var(--font-display)'}}>Candidate Infrastructure</h1>
-                        <div className="card" style={{marginBottom: '40px'}}>
-                            <h3>Commission New Candidate</h3>
-                            <form onSubmit={handleAddCandidate}>
-                                <div style={styles.candidateForm}>
-                                    <input className="form-input" placeholder="Full Name" value={newCandidate.name} onChange={e => setNewCandidate({...newCandidate, name: e.target.value})} required />
-                                    <input className="form-input" placeholder="Party / Slogan" value={newCandidate.party} onChange={e => setNewCandidate({...newCandidate, party: e.target.value})} required />
-                                    <select className="form-input" style={selectStyle} value={newCandidate.school} onChange={e => setNewCandidate({...newCandidate, school: e.target.value})} required>
-                                        <option value="" style={{background: '#1f2937'}}>Assign School</option>
-                                        <option value="Computing" style={{background: '#1f2937'}}>School of Computing</option>
-                                        <option value="Business" style={{background: '#1f2937'}}>School of Business</option>
-                                        <option value="Engineering" style={{background: '#1f2937'}}>School of Engineering</option>
-                                        <option value="Nursing" style={{background: '#1f2937'}}>School of Nursing</option>
-                                    </select>
-                                    <select className="form-input" style={selectStyle} value={newCandidate.position} onChange={e => setNewCandidate({...newCandidate, position: e.target.value})} required>
-                                        <option value="" style={{background: '#1f2937'}}>Select Position</option>
-                                        <option value="School Rep" style={{background: '#1f2937'}}>School Rep</option>
-                                        <option value="Mens Rep" style={{background: '#1f2937'}}>Mens Rep</option>
-                                        <option value="Womens Rep" style={{background: '#1f2937'}}>Womens Rep</option>
-                                    </select>
-                                </div>
-                                <button className="btn btn-primary btn-full" style={{marginTop: '15px'}} type="submit">Publish Candidate to Ballot</button>
-                            </form>
+                        <h1>Overview</h1>
+                        <div style={styles.grid}>
+                            <div className="glass-card" style={styles.statBox}><h3>{voters.length}</h3><small>TOTAL REGISTERED</small></div>
+                            <div className="glass-card" style={styles.statBox}><h3>{voters.filter(v => v.hasVoted).length}</h3><small>VOTES CAST</small></div>
+                            <div className="glass-card" style={styles.statBox}><h3>{systemAdmins.length}</h3><small>ACTIVE ADMINS</small></div>
                         </div>
-                        {candidates.length === 0 && !loading && <p style={{textAlign: 'center', color: 'var(--muted)'}}>No candidates on the ballot yet.</p>}
-                        {candidates.map(c => (
-                            <div key={c.id} className="card" style={styles.candidateItem}>
-                                <div>
-                                    <h4 style={{margin: 0, color: 'var(--white)'}}>{c.name}</h4>
-                                    <div style={{fontSize: '0.8rem', color: 'var(--accent)', fontWeight: 'bold', textTransform: 'uppercase'}}>
-                                        {c.position || 'General'} | {c.school || 'Universal'}
-                                    </div>
-                                    <div style={{fontSize: '0.75rem', color: 'var(--muted)'}}>{c.party}</div>
-                                </div>
-                                <div style={{display: 'flex', alignItems: 'center', gap: '20px'}}>
-                                    <div style={{textAlign: 'center'}}>
-                                        <div style={{fontSize: '1.2rem', fontWeight: 800, color: 'var(--green)'}}>{c.voteCount}</div>
-                                        <div style={{fontSize: '0.6rem', color: 'var(--muted)'}}>VOTES</div>
-                                    </div>
-                                    <button className="btn btn-danger btn-sm" onClick={() => handleDeleteCandidate(c.id)}>Remove</button>
-                                </div>
-                            </div>
-                        ))}
                     </div>
                 )}
 
                 {tab === 'voters' && (
                     <div className="fade-up">
-                        <h1 style={{marginBottom: '20px', fontFamily: 'var(--font-display)'}}>Voter Registry</h1>
-                        <input className="form-input" style={{marginBottom: '20px'}} placeholder="🔍 Search students by name or admission number..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
-                        <div className="card" style={{padding: 0, overflow: 'hidden'}}>
-                            <table style={styles.table}>
-                                <thead style={styles.thead}>
-                                <tr>
-                                    <th style={styles.th}>Student Name</th>
-                                    <th style={styles.th}>Admission No</th>
-                                    <th style={styles.th}>School</th>
-                                    <th style={styles.th}>Status</th>
-                                </tr>
-                                </thead>
-                                <tbody>
-                                {filteredVoters.map(v => (
-                                    <tr key={v.id} style={styles.tr}>
-                                        <td style={styles.td}>{v.name}</td>
-                                        <td style={styles.td}><code>{v.admissionNumber}</code></td>
-                                        <td style={styles.td}>{v.school}</td>
-                                        <td style={styles.td}>{v.hasVoted ? <span className="badge badge-green">VOTED</span> : <span className="badge badge-yellow">PENDING</span>}</td>
-                                    </tr>
-                                ))}
-                                </tbody>
-                            </table>
+                        <h1>Voter Registry</h1>
+                        <div className="glass-card" style={{marginTop: 20}}>
+                            {voters.filter(v => !v.isAdmin && !v.is_admin).map(v => (
+                                <div key={v.id} style={styles.listItem}>
+                                    <div><strong>{v.name}</strong><br/><small>{v.admissionNumber}</small></div>
+                                    <div style={{color: v.hasVoted ? '#00ff88' : '#ff4444'}}>{v.hasVoted ? '✓ Voted' : '○ Not Voted'}</div>
+                                </div>
+                            ))}
                         </div>
+                    </div>
+                )}
+
+                {tab === 'candidates' && (
+                    <div className="fade-up">
+                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 25}}>
+                            <h1>Candidates ({candidates.length})</h1>
+                            <button className="btn btn-primary btn-sm" onClick={() => setShowAddCandidate(true)}>+ ADD NEW</button>
+                        </div>
+                        <div className="glass-card" style={{padding: '10px'}}>
+                            {candidates.map(c => {
+                                const displayVotes = c.voteCount !== undefined ? c.voteCount : (c.vote_count || 0);
+                                return (
+                                    <div key={c.id} style={styles.listItem}>
+                                        <div style={{display: 'flex', alignItems: 'center', gap: '15px'}}>
+                                            <div style={{width: '4px', height: '35px', background: '#00ff88', borderRadius: '2px'}} />
+                                            <div>
+                                                <h4 style={{margin: 0}}>{c.name}</h4>
+                                                <small style={{opacity: 0.6}}>{c.position} | {c.party} | {c.school}</small>
+                                            </div>
+                                        </div>
+                                        <div style={{display: 'flex', alignItems: 'center', gap: '15px'}}>
+                                            <div style={{textAlign: 'right'}}><small style={{fontSize: '0.6rem'}}>VOTES</small><br/><strong>{displayVotes}</strong></div>
+                                            <button onClick={() => handleDeleteCandidate(c.id)} style={{background: 'rgba(255, 68, 68, 0.2)', border: 'none', color: '#ff4444', padding: '8px 12px', borderRadius: '8px', cursor: 'pointer'}}>🗑️</button>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
+                {tab === 'results' && (
+                    <div className="fade-up">
+                        <h1>Election Results</h1>
+                        {Object.keys(groupedCandidates).map(pos => {
+                            const totalVotes = groupedCandidates[pos].reduce((sum, c) => sum + (c.voteCount || c.vote_count || 0), 0);
+                            return (
+                                <div key={pos} className="glass-card" style={{padding: '20px', marginBottom: '20px'}}>
+                                    <h3 style={{marginBottom: '15px'}}>{pos} ({totalVotes} votes)</h3>
+                                    {groupedCandidates[pos].map(cand => {
+                                        const cVotes = cand.voteCount || cand.vote_count || 0;
+                                        const pct = totalVotes > 0 ? Math.round((cVotes / totalVotes) * 100) : 0;
+                                        return (
+                                            <div key={cand.id} style={{marginBottom: '15px'}}>
+                                                <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem'}}><span>{cand.name}</span><span>{pct}%</span></div>
+                                                <div style={styles.progressBg}><div style={{...styles.progressFill, width: `${pct}%`}} /></div>
+                                                <small style={{opacity: 0.5}}>{cVotes} votes</small>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            );
+                        })}
                     </div>
                 )}
 
                 {tab === 'control' && (
                     <div className="fade-up">
-                        <h1 style={{marginBottom: '30px', fontFamily: 'var(--font-display)'}}>Phase Control</h1>
-                        <div className="card" style={{textAlign: 'center', padding: '60px'}}>
-                            <p className="text-muted">Current Status:</p>
-                            <h2 style={{fontSize: '2.5rem', color: 'var(--accent)', marginBottom: '40px'}}>{phase.toUpperCase()}</h2>
-                            <div style={{display: 'flex', gap: '15px', justifyContent: 'center'}}>
-                                <button className={`btn ${phase === PHASES.REGISTRATION ? 'btn-primary' : 'btn-secondary'}`} onClick={() => handlePhaseChange(PHASES.REGISTRATION)}>Open Registration</button>
-                                <button className={`btn ${phase === PHASES.VOTING ? 'btn-success' : 'btn-secondary'}`} onClick={() => handlePhaseChange(PHASES.VOTING)}>Open Voting</button>
-                                <button className={`btn ${phase === PHASES.CLOSED ? 'btn-danger' : 'btn-secondary'}`} onClick={() => handlePhaseChange(PHASES.CLOSED)}>Close Election</button>
+                        <h1>Phase Control</h1>
+                        <div style={{display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '20px'}}>
+                            {[PHASES.REGISTRATION, PHASES.VOTING, PHASES.CLOSED].map(p => (
+                                <div key={p} className="glass-card" style={{...styles.phaseItem, border: phase === p ? '2px solid #ffcc00' : '1px solid rgba(255,255,255,0.1)'}}>
+                                    <div style={{textTransform: 'capitalize'}}><strong>{p} Phase</strong></div>
+                                    <button className={`btn ${phase === p ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setElectionPhase(p)}>
+                                        {phase === p ? 'Active' : 'Activate'}
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div style={{ marginTop: '80px', borderTop: '1px solid rgba(255, 68, 68, 0.3)', paddingTop: '30px' }}>
+                            <h3 style={{ color: '#ff4444', fontSize: '1rem', fontWeight: '800', marginBottom: '10px' }}>⚠️ DANGER ZONE</h3>
+                            <button className="btn" style={{background: '#ff4444', color: 'white', width: '100%', padding: '20px', fontWeight: '900', borderRadius: '12px'}}
+                                onClick={async () => {
+                                    if (window.confirm("FINAL WARNING: Wipe ALL current votes?")) {
+                                        const res = await resetElection();
+                                        if (res.success) { alert("Success!"); window.location.reload(); }
+                                    }
+                                }}>🔄 RESET ENTIRE ELECTION</button>
+                        </div>
+                    </div>
+                )}
+
+                {tab === 'admins' && (
+                    <div className="fade-up">
+                        <h1>Admin Management</h1>
+                        
+                        <div className="glass-card" style={{padding: '25px', marginBottom: '30px'}}>
+                            <h3 style={{marginBottom: '15px'}}>Authorize New System Admin</h3>
+                            <form onSubmit={handleAddAdmin} style={{display: 'flex', flexDirection: 'column', gap: '12px'}}>
+                                <input className="form-input" placeholder="Full Name" value={newAdmin.name} onChange={e => setNewAdmin({...newAdmin, name: e.target.value})} required />
+                                <input className="form-input" placeholder="Admin ID / admission" value={newAdmin.admissionNumber} onChange={e => setNewAdmin({...newAdmin, admissionNumber: e.target.value})} required />
+                                <input className="form-input" type="password" placeholder="System Password" value={newAdmin.password} onChange={e => setNewAdmin({...newAdmin, password: e.target.value})} required />
+                                <button className="btn btn-primary" disabled={loading} style={{marginTop: '10px'}}>
+                                    {loading ? 'Processing...' : 'GRANT ADMIN ACCESS'}
+                                </button>
+                            </form>
+                        </div>
+
+                        <div className="fade-up" style={{marginTop: '40px'}}>
+                            <h2 style={{marginBottom: '20px'}}>Current System Administrators ({systemAdmins.length})</h2>
+                            <div className="glass-card">
+                                {systemAdmins.length > 0 ? (
+                                    systemAdmins.map(admin => (
+                                        <div key={admin.id} style={styles.listItem}>
+                                            <div style={{display: 'flex', alignItems: 'center', gap: '15px'}}>
+                                                <div style={{width: '35px', height: '35px', borderRadius: '50%', background: 'rgba(255,204,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffcc00', fontWeight: 'bold'}}>
+                                                    {admin.name.charAt(0).toUpperCase()}
+                                                </div>
+                                                <div>
+                                                    <strong>{admin.name}</strong><br/>
+                                                    <small style={{opacity: 0.6}}>{admin.admissionNumber || admin.admission_number}</small>
+                                                </div>
+                                            </div>
+                                            <div style={{display: 'flex', gap: '10px'}}>
+                                                <span style={{background: 'rgba(0,255,136,0.1)', color: '#00ff88', padding: '4px 10px', borderRadius: '20px', fontSize: '0.7rem', fontWeight: 'bold', border: '1px solid rgba(0,255,136,0.2)'}}>
+                                                    ✓ SYSTEM ADMIN
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))
+                                ) : (
+                                    <div style={{padding: '30px', textAlign: 'center', opacity: 0.5}}>No system admins found in database.</div>
+                                )}
                             </div>
                         </div>
                     </div>
                 )}
-            </div>
+            </main>
+
+            {showAddCandidate && (
+                <div style={styles.modalOverlay}>
+                    <div className="glass-card" style={{padding: '30px', width: '400px'}}>
+                        <h2 style={{color: 'white'}}>Add Candidate</h2>
+                        <form onSubmit={handleAddCandidate} style={{display: 'flex', flexDirection: 'column', gap: 15, marginTop: 15}}>
+                            <input className="form-input" placeholder="Name" onChange={e => setNewCandidate({...newCandidate, name: e.target.value})} required />
+                            <input className="form-input" placeholder="Party" onChange={e => setNewCandidate({...newCandidate, party: e.target.value})} required />
+                            <input className="form-input" placeholder="Faculty" onChange={e => setNewCandidate({...newCandidate, school: e.target.value})} required />
+                            <input className="form-input" placeholder="Position" onChange={e => setNewCandidate({...newCandidate, position: e.target.value})} required />
+                            <div style={{display: 'flex', gap: 10}}>
+                                <button type="button" className="btn btn-secondary btn-full" onClick={() => setShowAddCandidate(false)}>Cancel</button>
+                                <button type="submit" className="btn btn-primary btn-full">Save</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
 
 const styles = {
-    loginCenter: { display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'var(--navy)' },
-    page: { display: 'flex', minHeight: '100vh', background: 'var(--navy)' },
-    sidebar: { width: '260px', background: 'rgba(0,0,0,0.3)', padding: '40px 25px', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column' },
-    main: { flex: 1, padding: '50px', overflowY: 'auto' },
-    tab: { background: 'none', border: 'none', color: 'var(--muted)', textAlign: 'left', padding: '15px', cursor: 'pointer', borderRadius: '10px', marginBottom: '5px', width: '100%' },
-    activeTab: { background: 'rgba(240,165,0,0.1)', borderLeft: '4px solid var(--accent)', color: 'var(--accent)', textAlign: 'left', padding: '15px', fontWeight: 'bold', borderRadius: '10px', marginBottom: '5px', width: '100%' },
-    candidateForm: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' },
-    candidateItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', border: '1px solid rgba(255,255,255,0.05)', padding: '20px' },
-    table: { width: '100%', borderCollapse: 'collapse' },
-    thead: { background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid var(--border)' },
-    th: { textAlign: 'left', padding: '15px', color: 'var(--accent)', fontSize: '0.8rem', textTransform: 'uppercase' },
-    tr: { borderBottom: '1px solid rgba(255,255,255,0.05)' },
-    td: { padding: '15px', fontSize: '0.9rem' }
+    layout: { display: 'flex', minHeight: '100vh', background: 'var(--primary-green)' },
+    sidebar: { width: '280px', padding: '40px 25px', display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.2)', borderRight: '1px solid var(--glass-border)', position: 'sticky', top: 0, height: '100vh' },
+    mainContent: { flex: 1, padding: '60px 40px', overflowY: 'auto', color: 'white' },
+    navBtn: { background: 'none', border: 'none', color: 'white', padding: '15px', textAlign: 'left', cursor: 'pointer', borderRadius: '12px', opacity: 0.6, fontSize: '0.9rem', marginBottom: 5, width: '100%' },
+    activeTab: { background: 'rgba(255,255,255,0.1)', color: 'var(--accent-gold)', fontWeight: 'bold', opacity: 1 },
+    grid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px' },
+    statBox: { textAlign: 'center', padding: '20px' },
+    listItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', borderBottom: '1px solid rgba(255,255,255,0.05)' },
+    progressBg: { background: 'rgba(255,255,255,0.1)', height: '8px', borderRadius: '4px', margin: '8px 0', overflow: 'hidden' },
+    progressFill: { background: '#ffcc00', height: '100%', borderRadius: '4px' },
+    phaseItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px' },
+    modalOverlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
+    loginCenter: { display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: 'var(--primary-green)' }
 };
